@@ -1,7 +1,8 @@
 package org.example;
+import java.io.Serializable;
 import java.util.List;
 
-public class ObjectDescription {
+public class ObjectDescription implements Serializable {
     private List<Element> elements;
     private String className;
 
@@ -21,4 +22,3 @@ public class ObjectDescription {
         this.className = className;
     }
 }
-

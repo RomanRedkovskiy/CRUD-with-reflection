@@ -1,6 +1,8 @@
 package org.example;
 
-public class Element {
+import java.io.Serializable;
+
+public class Element implements Serializable {
     String fieldType;
     String fieldName;
     String value;

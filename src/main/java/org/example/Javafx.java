@@ -1,5 +1,8 @@
 package org.example;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.reflect.TypeToken;
 import guitarHierarchy.Guitar;
 import javafx.application.Application;
 import javafx.collections.FXCollections;
@@ -10,41 +13,50 @@ import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.text.Font;
+import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import serialization.*;
+
+import java.io.*;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 public class Javafx extends Application {
     private static Stage window = null;
     private static Scene defaultScene = null;
     private static final String hierarchyPath = "guitarHierarchy.";
-    private static final ArrayList<ObjectDescription> guitarRecords = new ArrayList<>();
+    private static ArrayList<ObjectDescription> guitarRecords = new ArrayList<>();
     private static final ArrayList<String> currentValues = new ArrayList<>();
     private static final HashSet<String> commonDataTypes = new HashSet<>(Arrays.asList("int", "double", "java.lang.String"));
     private static final ArrayList<String> classPaths = new ArrayList<>(Arrays.asList(
             hierarchyPath + "Guitar", hierarchyPath + "UnpluggedGuitar", hierarchyPath + "PluggedGuitar",
-            hierarchyPath + "ElectricGuitar", hierarchyPath + "BassGuitar", hierarchyPath + "ElectroAcoustic"));
+            hierarchyPath + "ElectricGuitar", hierarchyPath + "BassGuitar"));
     private static final ArrayList<String> hierarchyClassnames = castHierarchyClassnamesFromClasspaths(classPaths);
     private static final TableView<Guitar> guitarTable = new TableView<>();
     private static int errorCounter = 0;
-    private static final int defaultMenuComboBoxInsetX = 435;
-    private static final int defaultMenuComboBoxInsetY = 520;
+    private static final int defaultMenuComboBoxInsetY = 415;
+    private static final int defaultMenuComboBoxInsetX = 520;
     private static final int distanceBetweenUIElements = 40;
     private static final int defaultErrorWindowHeight = 75;
     private static final int listOperationListOffset = 45;
     private static final int defaultMenuButtonHeight = 45;
     private static final int defaultMenuButtonWidth = 160;
-    private static final int defaultMenuTableInsetY = 60;
+    private static final int defaultMenuTableInsetY = 40;
     private static final int secondButtonLayoutX = 270;
     private static final int defaultMenuOffsetX = 340;
     private static final int defaultSceneLength = 680;
     private static final int mediumButtonHeight = 35;
-    private static final int defaultSceneWidth = 490;
-    private static final int defaultMenuInsetY = 415;
+    private static final int defaultSceneWidth = 510;
+    private static final int defaultMenuInsetY = 435;
     private static final int defaultMenuInsetX = 140;
     private static final int errorButtonWidth = 210;
     private static final int inheritanceWidth = 300;
@@ -55,6 +67,7 @@ public class Javafx extends Application {
     private static final int bigButtonHeight = 30;
     private static final int listMainLayoutY = 60;
     private static final int comboBoxWidth = 147;
+    private static final int menuBarMargin = 490;
     private static final int defaultLayoutX = 20;
     private static final int defaultWidth = 120;
     private static final int mediumOffset = 150;
@@ -71,14 +84,30 @@ public class Javafx extends Application {
     @Override
     public void start(Stage stage) {
         StackPane defaultLayout = new StackPane();
+        MenuBar menuBar = new MenuBar();
+        Menu fileMenu = new Menu("File");
+        MenuItem saveMenu = new Menu("Save");
+        MenuItem openMenu = new Menu("Open");
+        fileMenu.getItems().addAll(saveMenu, openMenu);
+        Menu pluginMenu = new Menu("Plugin");
+        menuBar.getMenus().addAll(fileMenu, pluginMenu);
+        StackPane.setMargin(menuBar, new Insets(0, 0, menuBarMargin, 0));
+        defaultLayout.getChildren().add(menuBar);
+
         window = stage;
         ArrayList<String> tableParameters = new ArrayList<>(Arrays.asList("brand", "model", "color", "material"));
-        ComboBox<String> classComboBox = createComboBox(defaultLayout, hierarchyClassnames, hierarchyClassnames.get(0));
-        classComboBox.setOnAction(e -> updateTableView(classComboBox.getValue()));
 
         Button addObject = createNamedButton(defaultLayout, "Add guitar of this class");
         Button editObject = createNamedButton(defaultLayout, "Edit chosen guitar");
         Button deleteObject = createNamedButton(defaultLayout, "Delete chosen guitar");
+        addObject.setDisable(true);
+        editObject.setDisable(true);
+        deleteObject.setDisable(true);
+
+        ComboBox<String> classComboBox = createComboBox(defaultLayout, hierarchyClassnames, hierarchyClassnames.get(0));
+        classComboBox.setOnAction(e -> onComboBoxChange(classComboBox.getValue(), addObject, editObject, deleteObject));
+
+        addSerializedMenuItems(saveMenu, openMenu, classComboBox);
 
         changeElementParams(addObject, -1, -1, defaultMenuButtonWidth, defaultMenuButtonHeight, "");
         changeElementParams(editObject, -1, -1, defaultMenuButtonWidth, defaultMenuButtonHeight, "");
@@ -90,7 +119,7 @@ public class Javafx extends Application {
         StackPane.setMargin(editObject, new Insets(defaultMenuInsetY, defaultMenuInsetX, 0, 0));
         StackPane.setMargin(deleteObject, new Insets(defaultMenuInsetY, defaultMenuInsetX - defaultMenuOffsetX, 0, 0));
         StackPane.setMargin(guitarTable, new Insets(0, defaultMenuInsetX, defaultMenuTableInsetY, 0));
-        StackPane.setMargin(classComboBox, new Insets(0, 0, defaultMenuComboBoxInsetX, defaultMenuComboBoxInsetY));
+        StackPane.setMargin(classComboBox, new Insets(0, 0, defaultMenuComboBoxInsetY, defaultMenuComboBoxInsetX));
 
         defaultScene = new Scene(defaultLayout, defaultSceneLength, defaultSceneWidth);
         setNewScene(window, defaultScene, "Guitar table");
@@ -104,6 +133,51 @@ public class Javafx extends Application {
                 processDoubleClickingOnTable(guitarTable.getSelectionModel().getSelectedIndex(), classComboBox.getValue());
             }
         });
+    }
+
+    public static void addSerializedMenuItems(MenuItem saveMenu, MenuItem openMenu, ComboBox<String> classComboBox) {
+        final List<Serializer> serializers = Arrays.asList(new Arbitrary(), new Binary(), new JSON());
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Open Resource File");
+        for (Serializer serializer : serializers) {
+            fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
+                    serializer.getType().getFileFilter(), serializer.getType().getStrFilter()));
+        }
+        saveMenu.setOnAction(e -> {
+            File selectedFile = fileChooser.showOpenDialog(null);
+            for(Serializer serializer: serializers){
+                if(getExtension(selectedFile.getName()).equals(getExtension(serializer.getType().getStrFilter()))){
+                    serializer.serialize(guitarRecords, selectedFile);
+                    break;
+                }
+            }
+        });
+        openMenu.setOnAction(e -> {
+            File selectedFile = fileChooser.showOpenDialog(null);
+            for(Serializer serializer: serializers){
+                if(getExtension(selectedFile.getName()).equals(getExtension(serializer.getType().getStrFilter()))){
+                    guitarRecords = serializer.deserialize(selectedFile);
+                    updateTableView(classComboBox.getValue());
+                }
+            }
+        });
+    }
+
+    public static String getExtension(String path) {
+        StringBuilder name = new StringBuilder();
+        int i = path.length();
+        boolean wasLastDotFound = false;
+        while (!wasLastDotFound) {
+            i--;
+            if (i == -1 || path.charAt(i) == '.') {
+                name.append(".");
+                wasLastDotFound = true;
+            }
+        }
+        for (i += 1; i < path.length(); i++) {
+            name.append(path.charAt(i));
+        }
+        return name.toString();
     }
 
     public static Label createLabel(Pane layout, String str) {
@@ -121,9 +195,11 @@ public class Javafx extends Application {
     }
 
     public static void processDoubleClickingOnTable(int chosenPos, String enumValue) {
-        int pos = findChosenPosInGuitarRecords(hierarchyPath + enumValue, chosenPos);
-        generateClassWindow(enumValue, pos);
-        updateTableView(enumValue);
+        if (!enumValue.equals("All")) {
+            int pos = findChosenPosInGuitarRecords(hierarchyPath + enumValue, chosenPos);
+            generateClassWindow(enumValue, pos);
+            updateTableView(enumValue);
+        }
     }
 
     public static void processObjectEditing(String enumValue) {
@@ -171,7 +247,7 @@ public class Javafx extends Application {
         for (ObjectDescription objectDescription : guitarRecord) {
             boolean isTrue = findValueOfGivenType((ArrayList<Element>) objectDescription.getElements(),
                     "isLeftHanded").equals("true");
-            if (objectDescription.getClassName().equals(path)) {
+            if (objectDescription.getClassName().equals(path) || path.equals(hierarchyPath + "All")) {
                 Guitar currGuitar = new Guitar(
                         findValueOfGivenType((ArrayList<Element>) objectDescription.getElements(), "brand"),
                         findValueOfGivenType((ArrayList<Element>) objectDescription.getElements(), "model"),
@@ -241,7 +317,6 @@ public class Javafx extends Application {
                 (inheritanceLevel), bigButtonHeight, "");
         changeElementParams(actionWithList, listLayout + mediumOffset * (inheritanceLevel + 1), rightOffset,
                 defaultWidth + mediumOffset * (inheritanceLevel), bigButtonHeight, "");
-        outputObjectDescriptionInConsole(objectDescription);
         addUIElements(objectDescription, sceneLayout);
         Scene classScene = new Scene(sceneLayout, inheritanceWidth * (inheritanceLevel + 1), inheritanceWidth);
 
@@ -787,6 +862,7 @@ public class Javafx extends Application {
 
     public static ArrayList<String> castHierarchyClassnamesFromClasspaths(ArrayList<String> classPaths) {
         ArrayList<String> classNames = new ArrayList<>();
+        classNames.add("All");
         for (String classPath : classPaths) {
             classNames.add(convertPathToName(classPath));
         }
@@ -812,6 +888,13 @@ public class Javafx extends Application {
 
         objectDescription.setElements(classFields);
         return objectDescription;
+    }
+
+    public static void onComboBoxChange(String value, Button add, Button edit, Button delete) {
+        add.setDisable(value.equals("All"));
+        edit.setDisable(value.equals("All"));
+        delete.setDisable(value.equals("All"));
+        updateTableView(value);
     }
 
     public static void updateTableView(String value) {
@@ -845,14 +928,6 @@ public class Javafx extends Application {
             name.append(path.charAt(i));
         }
         return name.toString();
-    }
-
-    public static void outputObjectDescriptionInConsole(ObjectDescription objectDescription) {
-        System.out.println(objectDescription.getClassName() + " -->");
-        for (Element element : objectDescription.getElements()) {
-            System.out.println(element.getFieldType() + " -- " + element.getFieldName() + " -- " + element.getValue()
-                    + " -- " + element.getCurrentLevelOfHierarchy());
-        }
     }
 
     public static void main(String[] args) {
