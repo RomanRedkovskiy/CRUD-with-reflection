@@ -1,13 +1,8 @@
 package serialization;
-
-import javafx.stage.FileChooser;
 import org.example.Element;
 import org.example.ObjectDescription;
-
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.util.ArrayList;
 
@@ -18,27 +13,17 @@ public class Arbitrary implements Serializer {
     }
 
     @Override
-    public void serialize(ArrayList<ObjectDescription> guitarRecords, File selectedFile) {
+    public String serialize(ArrayList<ObjectDescription> guitarRecords) {
         StringBuilder stringBuilder = new StringBuilder();
         for (ObjectDescription objectDescription : guitarRecords) {
             stringBuilder.append(objectDescriptionToString(objectDescription));
         }
-        try (Writer fileWriter = new FileWriter(selectedFile)) {
-            fileWriter.write(stringBuilder.toString());
-        } catch (IOException ex) {
-            throw new RuntimeException(ex);
-        }
+        return stringBuilder.toString();
     }
 
     @Override
-    public ArrayList<ObjectDescription> deserialize(File selectedFile) {
-        String fileData;
-        try {
-            fileData = new String(Files.readAllBytes(selectedFile.toPath()));
-        } catch (IOException ex) {
-            throw new RuntimeException(ex);
-        }
-        return parseFileDataIntoObject(fileData);
+    public ArrayList<ObjectDescription> deserialize(String data) {
+        return parseFileDataIntoObject(data);
     }
 
     public static ArrayList<ObjectDescription> parseFileDataIntoObject(String str) {

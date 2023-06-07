@@ -17,28 +17,20 @@ public class JSON implements Serializer{
     }
 
     @Override
-    public void serialize(ArrayList<ObjectDescription> guitarRecords, File selectedFile) {
+    public String serialize(ArrayList<ObjectDescription> guitarRecords) {
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
-        String jsonString = gson.toJson(guitarRecords);
-        try (Writer fileWriter = new FileWriter(selectedFile)) {
+        return gson.toJson(guitarRecords);
+/*        try (Writer fileWriter = new FileWriter(selectedFile)) {
             fileWriter.write(jsonString);
         } catch (IOException ex) {
             throw new RuntimeException(ex);
-        }
+        }*/
+
     }
 
     @Override
-    public ArrayList<ObjectDescription> deserialize(File selectedFile) {
-        try {
-            return new Gson().fromJson(new FileReader(selectedFile), new TypeToken<List<ObjectDescription>>() {}.getType());
-        } catch (FileNotFoundException ex) {
-            throw new RuntimeException(ex);
-        }
-    }
-    public static File getFileFromFileChooser() {
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter( "JSON files (*.json)", "*.json"));
-        fileChooser.setTitle("Open Resource File");
-        return fileChooser.showOpenDialog(null);
+    public ArrayList<ObjectDescription> deserialize(String data) {
+        //return new Gson().fromJson(new FileReader(selectedFile), new TypeToken<List<ObjectDescription>>() {}.getType());
+        return new Gson().fromJson(data, new TypeToken<List<ObjectDescription>>() {}.getType());
     }
 }

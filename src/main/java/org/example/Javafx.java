@@ -1,8 +1,5 @@
 package org.example;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.reflect.TypeToken;
 import guitarHierarchy.Guitar;
 import javafx.application.Application;
 import javafx.collections.FXCollections;
@@ -16,23 +13,23 @@ import javafx.scene.text.Font;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import pluginRealisation.plugins.AES;
+import pluginRealisation.plugins.DES;
+import pluginRealisation.Plugin;
 import serialization.*;
 
 import java.io.*;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
 
 public class Javafx extends Application {
     private static Stage window = null;
     private static Scene defaultScene = null;
+    private static List<Plugin> plugins = new ArrayList<>();
     private static final String hierarchyPath = "guitarHierarchy.";
     private static ArrayList<ObjectDescription> guitarRecords = new ArrayList<>();
     private static final ArrayList<String> currentValues = new ArrayList<>();
@@ -83,14 +80,23 @@ public class Javafx extends Application {
 
     @Override
     public void start(Stage stage) {
+        pluginLoader();
         StackPane defaultLayout = new StackPane();
         MenuBar menuBar = new MenuBar();
+
         Menu fileMenu = new Menu("File");
         MenuItem saveMenu = new Menu("Save");
         MenuItem openMenu = new Menu("Open");
         fileMenu.getItems().addAll(saveMenu, openMenu);
-        Menu pluginMenu = new Menu("Plugin");
+
+        Menu pluginMenu = new Menu("None");
+        MenuItem noneMenu = new Menu("None ☑");
+        MenuItem AESMenu = new Menu("AES");
+        MenuItem DESMenu = new Menu("DES");
+        pluginMenu.getItems().addAll(noneMenu, AESMenu, DESMenu);
+
         menuBar.getMenus().addAll(fileMenu, pluginMenu);
+
         StackPane.setMargin(menuBar, new Insets(0, 0, menuBarMargin, 0));
         defaultLayout.getChildren().add(menuBar);
 
@@ -107,7 +113,7 @@ public class Javafx extends Application {
         ComboBox<String> classComboBox = createComboBox(defaultLayout, hierarchyClassnames, hierarchyClassnames.get(0));
         classComboBox.setOnAction(e -> onComboBoxChange(classComboBox.getValue(), addObject, editObject, deleteObject));
 
-        addSerializedMenuItems(saveMenu, openMenu, classComboBox);
+        addSerializedMenuItems(saveMenu, openMenu, pluginMenu, classComboBox);
 
         changeElementParams(addObject, -1, -1, defaultMenuButtonWidth, defaultMenuButtonHeight, "");
         changeElementParams(editObject, -1, -1, defaultMenuButtonWidth, defaultMenuButtonHeight, "");
@@ -133,51 +139,175 @@ public class Javafx extends Application {
                 processDoubleClickingOnTable(guitarTable.getSelectionModel().getSelectedIndex(), classComboBox.getValue());
             }
         });
+        noneMenu.setOnAction(e -> {
+            pluginMenu.setText("None");
+            noneMenu.setText("None ☑");
+            AESMenu.setText("AES");
+            DESMenu.setText("DES");
+        });
+        AESMenu.setOnAction(e -> {
+            pluginMenu.setText("AES");
+            noneMenu.setText("None");
+            AESMenu.setText("AES ☑");
+            DESMenu.setText("DES");
+        });
+        DESMenu.setOnAction(e -> {
+            pluginMenu.setText("DES");
+            noneMenu.setText("None");
+            AESMenu.setText("AES");
+            DESMenu.setText("DES ☑");
+        });
     }
 
-    public static void addSerializedMenuItems(MenuItem saveMenu, MenuItem openMenu, ComboBox<String> classComboBox) {
+    public static void addSerializedMenuItems(MenuItem saveMenu, MenuItem openMenu, Menu pluginMenu,
+                                              ComboBox<String> classComboBox) {
         final List<Serializer> serializers = Arrays.asList(new Arbitrary(), new Binary(), new JSON());
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Open Resource File");
-        for (Serializer serializer : serializers) {
-            fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
-                    serializer.getType().getFileFilter(), serializer.getType().getStrFilter()));
-        }
+
         saveMenu.setOnAction(e -> {
+            updateFileFilterOptions(fileChooser, serializers, plugins, pluginMenu);
             File selectedFile = fileChooser.showOpenDialog(null);
-            for(Serializer serializer: serializers){
-                if(getExtension(selectedFile.getName()).equals(getExtension(serializer.getType().getStrFilter()))){
-                    serializer.serialize(guitarRecords, selectedFile);
+            String serializedData = "";
+            for (Serializer serializer : serializers) {
+                if (getExtension(deleteLastExtension(selectedFile.getName())).equals(getExtension
+                        (serializer.getType().getExtensionFilter()))) {
+                    serializedData = serializer.serialize(guitarRecords);
                     break;
                 }
             }
+            //for every plugin try to string -> string encrypt;
+            for (Plugin plugin : plugins) {
+                if (plugin.getType().getDescriptionFilter().equals(pluginMenu.getText())) {
+                    plugin.initialiseKeyFromStringRSA();
+                    serializedData = plugin.encrypt(serializedData);
+                }
+            }
+            try (FileWriter fileWriter = new FileWriter(selectedFile)) {
+                fileWriter.write(serializedData);
+            } catch (IOException ex) {
+                throw new RuntimeException(ex);
+            }
         });
         openMenu.setOnAction(e -> {
+            updateFileFilterOptions(fileChooser, serializers, plugins, pluginMenu);
             File selectedFile = fileChooser.showOpenDialog(null);
-            for(Serializer serializer: serializers){
-                if(getExtension(selectedFile.getName()).equals(getExtension(serializer.getType().getStrFilter()))){
-                    guitarRecords = serializer.deserialize(selectedFile);
+            String filePath = selectedFile.getName();
+            String fileData;
+            try {
+                fileData = Files.readString(selectedFile.toPath());
+            } catch (IOException ex) {
+                throw new RuntimeException(ex);
+            }
+            //for every plugin fileData = deciphered fileData (str -> str)
+            for (Plugin plugin : plugins) {
+                if (getExtension(filePath).equals(getExtension(plugin.getType().getExtensionFilter()))) {
+                    filePath = deleteLastExtension(filePath);
+                    plugin.initialiseKeyFromStringRSA();
+                    fileData = plugin.decrypt(fileData);
+                }
+            }
+            for (Serializer serializer : serializers) {
+                if (getExtension(filePath).equals(getExtension(serializer.getType().getExtensionFilter()))) {
+                    guitarRecords = serializer.deserialize(fileData);
                     updateTableView(classComboBox.getValue());
                 }
             }
         });
+
     }
 
-    public static String getExtension(String path) {
+    private static void pluginLoader() {
+        File dir = new File("src\\main\\java\\pluginRealisation\\plugins");
+        try {
+            URL[] urls = {
+                    dir.toURI().toURL()
+            };
+            ClassLoader cl = new URLClassLoader(urls);
+            for (File file : Objects.requireNonNull(dir.listFiles())) {
+                String className = deleteLastExtension(file.getName());
+                Class<?> clazz = cl.loadClass("pluginRealisation.plugins." + className);
+                Plugin plugin = (Plugin) clazz.getConstructor().newInstance();
+                plugins.add(plugin);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void updateFileFilterOptions(FileChooser fileChooser, List<Serializer> serializers,
+                                                List<Plugin> plugins, Menu pluginMenu) {
+        fileChooser.getExtensionFilters().clear();
+        ArrayList<String> descriptionsArray = new ArrayList<>();
+        ArrayList<String> extensionsArray = new ArrayList<>();
+        for (Serializer serializer : serializers) {
+            descriptionsArray.add(serializer.getType().getDescriptionFilter());
+            extensionsArray.add(serializer.getType().getExtensionFilter());
+        }
+        for (Plugin plugin : plugins) {
+            if (plugin.getType().getDescriptionFilter().equals(pluginMenu.getText())) {
+                descriptionsArray.replaceAll(description -> changeDescription(description,
+                        plugin.getType().getDescriptionFilter(),
+                        plugin.getType().getExtensionFilter()));
+                extensionsArray.replaceAll(extension -> changeExtension(extension,
+                        plugin.getType().getExtensionFilter()));
+            }
+        }
+        for (int i = 0; i < descriptionsArray.size(); i++) {
+            fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter
+                    (descriptionsArray.get(i), extensionsArray.get(i)));
+        }
+    }
+
+    private static String changeDescription(String description, String pluginDescription, String pluginExtension) {
+        StringBuilder descriptionBuilder = new StringBuilder();
+        boolean wasDescriptionInserted = false;
+        boolean wasExtensionInserted = false;
+        for (int i = 0; i < description.length(); i++) {
+            if (description.charAt(i) == ' ' && !wasDescriptionInserted) {
+                descriptionBuilder.append('-').append(pluginDescription);
+                wasDescriptionInserted = true;
+            } else if (description.charAt(i) == ')' && !wasExtensionInserted) {
+                descriptionBuilder.append(pluginExtension);
+                wasExtensionInserted = true;
+            }
+            descriptionBuilder.append(description.charAt(i));
+        }
+        return descriptionBuilder.toString();
+    }
+
+    private static String changeExtension(String extension, String pluginExtension) {
+        return extension + pluginExtension;
+    }
+
+    private static String getExtension(String path) {
         StringBuilder name = new StringBuilder();
+        int i = findLastDotPos(path);
+        for (; i < path.length(); i++) {
+            name.append(path.charAt(i));
+        }
+        return name.toString();
+    }
+
+    private static String deleteLastExtension(String path) {
+        StringBuilder name = new StringBuilder();
+        int i = findLastDotPos(path);
+        for (int j = 0; j < i; j++) {
+            name.append(path.charAt(j));
+        }
+        return name.toString();
+    }
+
+    private static int findLastDotPos(String path) {
         int i = path.length();
         boolean wasLastDotFound = false;
         while (!wasLastDotFound) {
             i--;
             if (i == -1 || path.charAt(i) == '.') {
-                name.append(".");
                 wasLastDotFound = true;
             }
         }
-        for (i += 1; i < path.length(); i++) {
-            name.append(path.charAt(i));
-        }
-        return name.toString();
+        return i;
     }
 
     public static Label createLabel(Pane layout, String str) {

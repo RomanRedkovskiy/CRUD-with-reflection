@@ -9,7 +9,7 @@ public interface Serializer {
 
     SerializerType getType();
 
-    void serialize(ArrayList<ObjectDescription> guitarRecords, File selectedFile);
+    String serialize(ArrayList<ObjectDescription> guitarRecords);
 
-    ArrayList<ObjectDescription> deserialize(File selectedFile);
+    ArrayList<ObjectDescription> deserialize(String data);
 }

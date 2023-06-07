@@ -1,14 +1,12 @@
-package serialization;
+package pluginRealisation;
 
-public enum SerializerType {
-    JSON("JSON files (*.json)", "*.json"),
-    BINARY( "BIN files (*.bin)", "*.bin"),
-    ARBITRARY( "TXT files (*.txt)", "*.txt");
-
+public enum PluginType {
+    AES("AES", ".aes"),
+    DES( "DES", ".des");
     private final String descriptionFilter;
     private final String extensionFilter;
 
-    SerializerType(String descriptionFilter, String extensionFilter) {
+    PluginType(String descriptionFilter, String extensionFilter) {
         this.descriptionFilter = descriptionFilter;
         this.extensionFilter = extensionFilter;
     }
